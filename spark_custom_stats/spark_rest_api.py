@@ -4,6 +4,18 @@ import importlib.util
 import subprocess
 import pandas as pd
 
+# Check if pandas is installed
+if importlib.util.find_spec("pandas") is None:
+    print("pandas is not installed. Installing...")
+    result = subprocess.run(["pip3", "install", "pandas"])
+    if result.returncode!=0:
+        print(f"F_ERROR!!!! Couldn't install pandas package with pip3 install pandas. Please check. Exiting")
+        exit(1)
+
+    print(f"pandas module successfully installed")
+
+
+
 # Check if boto3 is installed
 if importlib.util.find_spec("requests") is None:
     print("requests is not installed. Installing...")
@@ -15,16 +27,6 @@ if importlib.util.find_spec("requests") is None:
     print(f"requests module successfully installed")
 
 
-if importlib.util.find_spec("boto3") is None:
-    print("boto3 is not installed. Installing...")
-    result = subprocess.run(["pip3", "install", "boto3"])
-    if result.returncode!=0:
-        print(f"F_ERROR!!!! Couldn't install requests package with pip3 install boto3. Please check. Exiting")
-        exit(1)
-
-    print(f"boto3 module successfully installed")
-
-
 
 ##################################
 
@@ -32,10 +34,9 @@ if importlib.util.find_spec("boto3") is None:
 import requests
 import json
 import re
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType, TimestampType, MapType, ArrayType,LongType, DoubleType
 from datetime import datetime
 import time
-import db_script as db_script
+#import db_script as db_script
 
 # Sample Example of how a API request URL would look like
 #url = "http://xx.x.x.xxxz:18080/api/v1/applications/application_1710224122225_0012/sql?offset=0&length=1"
@@ -48,8 +49,12 @@ month = dt.month #'%02d' % dt.month
 day = dt.day #'%02d' % dt.day
 ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 
-
-######################## UPDATE THESE VARIABLES AS PER YOUR USE CASE ###############################################
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+################################################ UPDATE THESE VARIABLES AS PER YOUR USE CASE ###############################################
 
 
 ip_final = "localhost"
@@ -58,39 +63,16 @@ spark_ui_port = 4040 ##18080
 final_stats_columns = ['year','month','day','process_name','sql_id','sql_status','src_paths','src_file_formats','src_no_of_files','src_size_in_gb','src_counts','dest_path','dest_no_of_files','dest_size_in_gb',
                        'dest_count','dest_schema','dest_file_format','dest_num_partitions','dest_partition_cols','dest_repartition_no','duration_in_mins','timestamp']
 
-final_stats_schema = StructType([
-    StructField("year", IntegerType(), True),
-    StructField("month", IntegerType(), True),
-    StructField("day", IntegerType(), True),
-    StructField("process_name", StringType(), True),
-    StructField("sql_id", LongType(), True),
-    StructField("sql_status", StringType(), True),
-    StructField("src_paths", MapType(StringType(), StringType()), True),
-    StructField("src_file_formats", MapType(StringType(), StringType()), True),
-    StructField("src_no_of_files", MapType(StringType(), LongType()), True),
-    StructField("src_size_in_gb", MapType(StringType(), ArrayType(FloatType())), True),
-    StructField("src_counts", MapType(StringType(), LongType()), True),
-    StructField("dest_path", StringType(), True),
-    StructField("dest_no_of_files", LongType(), True),
-    StructField("dest_size_in_gb", FloatType(), True),
-    StructField("dest_count", LongType(), True),
-    StructField("dest_schema", StringType(), True),
-    StructField("dest_file_format", StringType(), True),
-    StructField("dest_num_partitions", IntegerType(), True),
-    StructField("dest_partition_cols", MapType(StringType(), StringType()), True),
-    StructField("dest_repartition_no", LongType(), True),
-    StructField("duration_in_mins", FloatType(), True),
-    StructField("timestamp", TimestampType(), True),
-    StructField("response", StringType(), True)
-
-])
-
-
 
 threshold_out_final_no_files = 5000
 
 
 ######################################################################################################################
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
+## &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&& ##
 
 
 def custom_log(msg):
@@ -110,7 +92,7 @@ def generate_api_url(spark):
     ip_intermediate = ip_raw.split(':')[1].replace("//","")  ##['http', '//ip-xx-x-x-xxx.ec2.internal', '4041']
     ip_final = ip_intermediate.split(".")[0].replace("ip-","").replace("-",".")  # 'xx.x.x.xxx'''
     custom_log(f"ip of master node is {ip_final}")
-    url = f"http://{ip_final}:18080/api/v1/applications/{application_id}/sql?offset=0&length=10000"
+    url = f"http://{ip_final}:{spark_ui_port}/api/v1/applications/{application_id}/sql?offset=0&length=10000"
     custom_log(f"API url is {url}")
     return url
 
@@ -221,6 +203,7 @@ def get_parameters_of_sql_id(final_response,sql_id):
         return
 
     if "save " in sql_id_info['description'] or "csv " in sql_id_info['description'] or "parquet " in sql_id_info['description']:
+        custom_log("caught inside parquet")
         plan_description = sql_id_info['planDescription']
         if "InsertIntoHadoopFsRelationCommand" not in plan_description:
             custom_log(f"Description is {sql_id_info['description']}")
@@ -248,31 +231,23 @@ def get_parameters_of_sql_id(final_response,sql_id):
                 key_end_index = part.find('=')
                 output_dict[part[:key_end_index].strip()] = part[key_end_index + 1:].strip()
 
-            #custom_log(output_dict)
+            custom_log(f"output_dict is {output_dict}")
             output_path[0] = output_dict['path']
 
         else:
-            output_info_start_index = plan_description.find("[")
-            output_info_end_index = plan_description.find("]", output_info_start_index)
+            output_info_start_index = plan_description.find("[path")
+            output_info_end_index = plan_description.find("/]", output_info_start_index)
             output_info = plan_description[output_info_start_index+1:output_info_end_index].split(',')
             custom_log(output_info)
             output_dict = {}
             for part in output_info:
                 key_end_index = part.find('=')
                 output_dict[part[:key_end_index].strip()]=part[key_end_index+1:].strip()
-
+            custom_log(f"output_dict is {output_dict}")
             output_path[0] = output_dict['path']
             #custom_log(output_dict)
 
-        if not(check_if_this_is_required_path(output_path[0],save_path)):
-            custom_log(f"since output path {output_path[0]} is not equal to {save_path}. Continuing with next iteration")
-            if sql_id==len(final_response)-1:
-                print(final_response[-1])
-                print(f"Entered final element, still not found. This save statement will be missing in the table")
-                ##exit(1)
-        else:
-            custom_log(
-                f"output path {output_path[0]} Found.")
+        custom_log(f"OUTSIDE IF")
 
         #get write format  ['InsertIntoHadoopFsRelationCommand s3://180bytwo-tmp/temp/test_csv', ' false', ' CSV', '']
         write_file_format = plan_description[:output_info_start_index-1].split(',')[-2]
@@ -465,9 +440,9 @@ def get_parameters_of_sql_id(final_response,sql_id):
 
 
 ## safe_spark calls this function
-def spark_rest_api(spark, dt_formatted=ts):
+def spark_rest_api(spark):
     custom_log(f"Inside spark_rest_api")
-    time.sleep(10)
+    #time.sleep(10)
     final_stats_result = []
     try:
         url = generate_api_url(spark)
@@ -477,12 +452,18 @@ def spark_rest_api(spark, dt_formatted=ts):
         
         for sql_id in range(len(final_response)):
             tmp_data=get_parameters_of_sql_id(final_response,sql_id )
-            if not tmp_data:
+            if tmp_data:
                 final_stats_result.append(tmp_data)
 
-        ## Display information
+        ## Display information  
+        custom_log("Final result is")
+        custom_log(final_stats_result)
+        if not final_stats_result:
+            custom_log(f"Entire resultset is Null meaning there were no write commands called in spark application")
+            exit(0)
         output_df = pd.DataFrame(final_stats_result, columns=final_stats_columns)
-        print(output_df['dest_no_of_files','dest_size_in_gb','dest_count','dest_schema','dest_partition_cols','duration_in_mins','timestamp'].head(20))
+        print(output_df)
+        print(output_df[['dest_no_of_files','dest_size_in_gb','dest_count','dest_schema','dest_partition_cols','duration_in_mins','timestamp']].head(20))
 
 
     except Exception as e:
