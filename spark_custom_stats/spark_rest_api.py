@@ -51,6 +51,10 @@ ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 
 ######################## UPDATE THESE VARIABLES AS PER YOUR USE CASE ###############################################
 
+
+ip_final = "localhost"
+spark_ui_port = 4040 ##18080
+
 final_stats_columns = ['year','month','day','process_name','sql_id','sql_status','src_paths','src_file_formats','src_no_of_files','src_size_in_gb','src_counts','dest_path','dest_no_of_files','dest_size_in_gb',
                        'dest_count','dest_schema','dest_file_format','dest_num_partitions','dest_partition_cols','dest_repartition_no','duration_in_mins','timestamp','response']
 
@@ -101,9 +105,10 @@ def generate_api_url(spark):
     #custom_log(f"Inside generate_api_url function with argument spark -> {spark}")
     application_id = spark.sparkContext.applicationId
     custom_log(f"application_id is {application_id}")
-    ip_raw = spark.sparkContext.uiWebUrl  #'http://ip-xx-x-x-xxx.ec2.internal:4041'
+    ''' #Uncomment the below lines if you are running in a cluster environment on some cloud platform
+    ip_raw = spark.sparkContext.uiWebUrl  
     ip_intermediate = ip_raw.split(':')[1].replace("//","")  ##['http', '//ip-xx-x-x-xxx.ec2.internal', '4041']
-    ip_final = ip_intermediate.split(".")[0].replace("ip-","").replace("-",".")  # 'xx.x.x.xxx'
+    ip_final = ip_intermediate.split(".")[0].replace("ip-","").replace("-",".")  # 'xx.x.x.xxx'''
     custom_log(f"ip of master node is {ip_final}")
     url = f"http://{ip_final}:18080/api/v1/applications/{application_id}/sql?offset=0&length=10000"
     custom_log(f"API url is {url}")
@@ -132,29 +137,30 @@ def write_to_db(output_df):
 
 
 
-def spark_rest_api_call(spark,url,save_path):
+
+def kb_to_gb(kb):
+    return kb / (1024.0 * 1024)
+
+
+def mb_to_gb(mb):
+    return mb / 1024.0
+
+
+def tb_to_gb(tb):
+    return tb * (1024.0 ** 2)
+
+def bytes_to_gb(bytes):
+    return bytes / (1024.0 ** 3)
+
+
+def spark_rest_api_call(url,save_path):
     # Make a GET request to the API endpoint
     #custom_log(f"Inside spark_rest_api function with arguments spark -> {spark} \n url => {url} \n save_path -> {save_path}")
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'}
     import requests
     response = requests.get(url)
 
     ##action descriptions -> csv,showString, collect, count, save, load
 
-    def kb_to_gb(kb):
-        return kb / (1024.0 * 1024)
-
-
-    def mb_to_gb(mb):
-        return mb / 1024.0
-
-
-    def tb_to_gb(tb):
-        return tb * (1024.0 ** 2)
-
-    def bytes_to_gb(bytes):
-        return bytes / (1024.0 ** 3)
 
     # Check if the request was successful (status code 200)
     if response.status_code == 200:
@@ -262,14 +268,13 @@ def spark_rest_api_call(spark,url,save_path):
                         print(final_response[-1])
                         print(f"Entered final element, still not found. This save statement will be missing in the table")
                         ##exit(1)
-                    continue
                 else:
                     custom_log(
                         f"output path {output_path[0]} Found.")
 
-                    #get write format  ['InsertIntoHadoopFsRelationCommand s3://180bytwo-tmp/temp/test_csv', ' false', ' CSV', '']
-                    write_file_format = plan_description[:output_info_start_index-1].split(',')[-2]
-                    output_file_format[0] = write_file_format
+                #get write format  ['InsertIntoHadoopFsRelationCommand s3://180bytwo-tmp/temp/test_csv', ' false', ' CSV', '']
+                write_file_format = plan_description[:output_info_start_index-1].split(',')[-2]
+                output_file_format[0] = write_file_format
 
 
                 ### If Repartitioning exists
@@ -475,7 +480,7 @@ def spark_rest_api(spark, save_path, dt_formatted=ts):
     time.sleep(10)
     try:
         url = generate_api_url(spark)
-        spark_rest_api_call(spark,url,save_path)
+        spark_rest_api_call(url,save_path)
     except Exception as e:
         custom_log(f"caught Exception at main spark_rest_api execution with exception -> {e}")
 
