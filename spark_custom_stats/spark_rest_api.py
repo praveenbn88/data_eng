@@ -76,7 +76,11 @@ threshold_out_final_no_files = 5000
 
 
 def custom_log(msg):
-    print(msg)
+
+    ''' You can implement your own version of logging here. I'm just printing the message in this case
+    '''
+    ts = datetime.now()
+    print(f"{ts} -> {msg}")
 
 
 
