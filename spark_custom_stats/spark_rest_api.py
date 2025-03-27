@@ -60,6 +60,7 @@ ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
 ip_final = "localhost"
 spark_ui_port = 4040 ##18080
 
+# These are the final list of columns that appear in the stats
 final_stats_columns = ['year','month','day','process_name','sql_id','sql_status','src_paths','src_file_formats','src_no_of_files','src_size_in_gb','src_counts','dest_path','dest_no_of_files','dest_size_in_gb',
                        'dest_count','dest_schema','dest_file_format','dest_num_partitions','dest_partition_cols','dest_repartition_no','duration_in_mins','timestamp']
 
