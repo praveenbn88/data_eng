@@ -15,7 +15,8 @@ table_name = 'spark_framework_stats'
 final_stats_columns = ['year','month','day','process_name','sql_id','sql_status','src_paths','src_file_formats','src_no_of_files','src_size_in_gb','src_counts','dest_path','dest_no_of_files','dest_size_in_gb',
                        'dest_count','dest_schema','dest_file_format','dest_num_partitions','dest_partition_cols','dest_repartition_no','duration_in_mins','timestamp','response']
 
-
+db_name = "spark_framework"
+db_password = "password"
 ##############################################################################################################
 
 ## Global Variables - DO not touch these
@@ -36,8 +37,8 @@ def database_conn_details():
     global conn 
     global cursor
     try:
-        db_name = "spark_framework"
-        password = "password"
+        db_name = db_name
+        password = db_password
         # Establish connection
         conn = mysql.connector.connect(
             host="localhost",
@@ -118,8 +119,7 @@ def query_data(query,cursor):
         records_list = [list(row) for row in rows]
         #custom_log(f"records_list is {records_list}") 
         return records_list, columns
-        '''df = pd.DataFrame(rows, columns=columns)
-        print(df)'''
+
     except mysql.connector.Error as err:
         custom_log(f"ERROR!!! mysql.connector.Error: {err}")
         exit(1)    
