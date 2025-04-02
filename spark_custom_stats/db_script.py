@@ -1,3 +1,5 @@
+## This script will connect to DB in the backend
+
 from datetime import datetime
 import uuid
 import pandas as pd
