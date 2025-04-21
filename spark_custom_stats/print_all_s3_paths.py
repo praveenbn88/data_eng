@@ -5,7 +5,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+## This function returns all the S3 paths that match the pattern
 def find_s3_bucket_paths(script_path):
     # Regular expression pattern to match S3 bucket paths
     logger.info(f"started find_s3_bucket_paths with arg {find_s3_bucket_paths}")
