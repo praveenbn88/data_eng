@@ -3,8 +3,10 @@ from pyspark.sql.functions import from_json, col, count, sum, avg, current_times
     concat, lit, date_add
 from pyspark.sql.types import StructType, StringType, TimestampType, DoubleType, IntegerType
 from cassandra.cluster import Cluster
+import uuid
+import pyspark.sql.functions as F
+import traceback
 import logging
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,25 +17,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+################## Global Variables #########################
+
 APP_NAME = "tenantstreamapp"
 KAFKA_HOST = "broker:9092"
+cassandra_keyspace = "spark_streaming"
 
-spark = SparkSession.builder \
-            .appName('SparkDataStreaming') \
-            .config('spark.jars.packages', "com.datastax.spark:spark-cassandra-connector_2.12:3.5.1,"
-                                           "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
-            .config('spark.cassandra.connection.host', 'cassandra_db') \
-            .config('spark.sql.streaming.continuous.enabled', 'true') \
-            .getOrCreate()
-spark.sparkContext.setLogLevel("ERROR")
+checkpoint_dir = "/tmp/checkpoints_new_89"
+################## Global Variables #########################
 
-spark.catalog.clearCache()
+
+def create_spark_connection():
+    try:
+        spark = SparkSession.builder \
+                    .appName('SparkDataStreaming') \
+                    .config('spark.jars.packages', "com.datastax.spark:spark-cassandra-connector_2.12:3.5.1,"
+                                                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1") \
+                    .config('spark.cassandra.connection.host', 'cassandra_db') \
+                    .config('spark.sql.streaming.continuous.enabled', 'true') \
+                    .getOrCreate()
+        spark.sparkContext.setLogLevel("ERROR")
+
+        spark.catalog.clearCache()
+        return spark
+    
+    except Exception as e:
+        logger.error(f"Error while creating spark connection: {e}")
+        exit(1)
 
 
 ################################ Cassandra Setup ####################################################
 def create_keyspace(session):
-    session.execute("""
-        CREATE KEYSPACE IF NOT EXISTS spark_streaming
+    session.execute(f"""
+        CREATE KEYSPACE IF NOT EXISTS {cassandra_keyspace}
         WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}
         """)
     
@@ -55,43 +71,101 @@ def create_cassandra_connection():
 
 
 
-def create_table(session):
-    session.execute("""
-        CREATE TABLE IF NOT EXISTS spark_streaming.created_users (
-            first_name TEXT,
-            last_name TEXT,
-            gender TEXT,
-            address TEXT,
-            post_code TEXT,
-            email TEXT,
-            username TEXT PRIMARY KEY,
-            dob TEXT,
-            registered_date TEXT,
-            phone TEXT,
-            picture TEXT,
-            last_modified_ts timestamp);
-        """)
+def create_cassandra_table(session, table_name, schema, primary_key):
+    """
+    Create a Cassandra table if not exists with the given schema and primary key.
+
+    :param session: Cassandra driver session (e.g., from cassandra.cluster.Cluster.connect())  
+    :param table_name: Table name as string  
+    :param schema: List of tuples [(col_name, col_type), ...]  
+                   e.g. [("first_name", "TEXT"), ("age", "INT"), ...]  
+    :param primary_key: String or tuple/list of strings for the PK  
+                        e.g. "username" or ("user_id", "event_time")  
+    """
+
+    col_defs = ",\n    ".join(f"{col} {dtype}" for col, dtype in schema)
+
+    if isinstance(primary_key, (list, tuple)):
+        pk = "(" + ", ".join(primary_key) + ")"
+    else:
+        pk = primary_key
+    cql = f"""
+    CREATE TABLE IF NOT EXISTS {cassandra_keyspace}.{table_name} (
+        {col_defs},
+        PRIMARY KEY ({pk})
+    );
+    """.strip()
+
+    # Execute
+    session.execute(cql)
     
-    logger.info("Table created successfully")
+    logger.info(f"Table {table_name} created successfully")
+
+
+
+def write_to_cassandra(df,table_name):
+    try:
+        selection_df = df.withColumn("last_modified_ts", F.current_timestamp())
+
+        (selection_df.write.format("org.apache.spark.sql.cassandra")
+                            .option('keyspace', f'{cassandra_keyspace}')
+                            .mode("append") 
+                            .option('table', f"{table_name}")
+                            .save())
+    except Exception as e:
+        logger.error(f"Error while processing batch: {e}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
+        
+        logger.error(f"Traceback: {traceback.format_exc()}")
 
 
 ################################ Cassandra Setup Ends ####################################################
 
 
+uuid_udf = F.udf(lambda: str(uuid.uuid4()), StringType())
 
 
 
-
-
-
-def return_write_stream(df, topic, mode, name):
-    return df.writeStream.outputMode(mode).format("kafka").queryName(name).option("kafka.bootstrap.servers",
+def return_write_stream(df, topic):
+    logger.info(f"inside return_write_stream for topic {APP_NAME}_{topic}")
+    '''return df.writeStream.outputMode(mode).format("kafka").queryName(name).option("kafka.bootstrap.servers",
                                                                                   KAFKA_HOST).option(
-        "topic", f"{APP_NAME}_{topic}").option("checkpointLocation", f"/tmp/checkpoints/{topic}").start()
+        "topic", f"{APP_NAME}_{topic}").option("checkpointLocation", f"/tmp/checkpoints/{topic}").start()'''
+
+    df.write \
+        .format("kafka") \
+        .option("kafka.bootstrap.servers", KAFKA_HOST) \
+        .option("topic", f"{APP_NAME}_{topic}") \
+        .mode("append") \
+        .save()
 
 
 
-def read_from_kafka():
+def  write_to_multiple_sinks(topic,table_name):
+
+    def process_batch(df, batch_id):
+        print(f"Processing batch {batch_id}")
+        try:
+            df.cache()
+            df.show(20,False)
+
+            write_to_cassandra(df,table_name)
+            #return_write_stream(df, topic )
+        except Exception as e:
+            logger.error(f"Error while processing batch: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
+            
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    return process_batch        
+
+
+
+
+
+def read_from_kafka(spark):
 
     schema = StructType().add("trip_id", StringType(), True) \
         .add("taxi_id", StringType(), True) \
@@ -133,12 +207,16 @@ def read_from_kafka():
     info_df = base_df.select(from_json(col("value"), schema).alias("trip_schema"), "timestamp")
     info_df_fin = info_df.select("trip_schema.*", "timestamp")
 
-    info_df_fin.cache()
     return info_df_fin
 
 
 
 def sumFareWindowStream(info_df_fin):
+    topic ="sumFareWindowStream"
+    writemode="update"
+    query_name = "sum_fare_window_stream"
+
+
     # fare distribution
     sum_fare_window = info_df_fin.withWatermark("event_timestamp", "10 seconds").groupBy(
         window("event_timestamp", "5 seconds")).agg(round(sum("fare"), 0).alias("total_fare"),
@@ -146,12 +224,21 @@ def sumFareWindowStream(info_df_fin):
                                                     round(sum("trip_total"), 0).alias(
                                                         "total_trip_total")).selectExpr(
         "to_json(struct(*)) AS value")
-    sum_fare_window_stream = return_write_stream(sum_fare_window, "sumFareWindowStream", "update", "sum_fare_window_stream")
+    #sum_fare_window_stream = return_write_stream(sum_fare_window, "sumFareWindowStream", "update", "sum_fare_window_stream")
+    sum_fare_window_stream =  sum_fare_window.writeStream \
+                                .queryName(query_name) \
+                                .foreachBatch(write_to_multiple_sinks(topic)) \
+                                .option("checkpointLocation", f"{checkpoint_dir}/{topic}") \
+                                .outputMode(writemode) \
+                                .start()
     return sum_fare_window_stream
 
 
 def tripsTotalStream(info_df_fin):
     # total so far
+    topic ="tripsTotalStream"
+    writemode="update"
+    query_name = "trips_total_stream"
     today = current_date()
     specific_time = "00:00:00"  # Change this to your specific time
     specific_date_time = concat(today, lit(" "), lit(specific_time)).cast("timestamp")
@@ -162,34 +249,120 @@ def tripsTotalStream(info_df_fin):
                                             round(avg("tips"), 0).alias("tips_avg"),
                                             round(avg("trip_total"), 0).alias("trip_total_avg")).selectExpr(
         "to_json(struct(*)) AS value")
-    trips_total_stream = return_write_stream(trips_total, "tripsTotalStream", "complete", "trips_total_stream")
+    ##trips_total_stream = return_write_stream(trips_total, "tripsTotalStream", "complete", "trips_total_stream")
+
+    trips_total_stream =  trips_total.writeStream \
+                            .queryName(query_name) \
+                            .foreachBatch(write_to_multiple_sinks(topic)) \
+                            .option("checkpointLocation", f"{checkpoint_dir}/{topic}") \
+                            .outputMode(writemode) \
+                            .start()
     return trips_total_stream
 
 
 def hotspotCommunityPickupWindowStream(info_df_fin):
+    topic ="hotspotCommunityPickupWindowStream"
+    writemode="append"
+    query_name = "hot_spot_community_pickup_window_stream"
+    table_name = query_name
+
+    cassandra_session = create_cassandra_connection()
+
+    cassandra_schema = [
+    ("id","uuid"),
+    ("pickup_community_area", "TEXT"),
+    ("count", "int"),
+    ("window_start", "TIMESTAMP"),
+    ("window_end", "TIMESTAMP"),
+    ("last_modified_ts", "TIMESTAMP")
+        ]
+
+    # 3. Call helper
+    create_cassandra_table(
+        cassandra_session,
+        table_name=table_name,
+        schema=cassandra_schema,
+        primary_key="id"
+    )
     # hot spot pickup community area
     hot_spot_community_pickup_window = info_df_fin.withWatermark("event_timestamp", "10 seconds").groupBy(
         window("event_timestamp", "1 minute", "30 seconds"), "pickup_community_area").count().filter(
-        col("pickup_community_area").isNotNull()).selectExpr(
-        "to_json(struct(*)) AS value")
-    hot_spot_community_pickup_window_stream = return_write_stream(hot_spot_community_pickup_window,
+        col("pickup_community_area").isNotNull())##.selectExpr("to_json(struct(*)) AS value")
+    
+    hot_spot_community_pickup_window = hot_spot_community_pickup_window.withColumn("id", uuid_udf()).withColumn("last_modified_ts", F.current_timestamp()).select("id","pickup_community_area","count",F.col("window.start").alias("window_start"), F.col("window.end").alias("window_end"),"last_modified_ts")
+    
+
+    hot_spot_community_pickup_window_stream =  hot_spot_community_pickup_window.writeStream \
+                        .queryName(query_name) \
+                        .foreachBatch(write_to_multiple_sinks(topic,table_name)) \
+                        .option("checkpointLocation", f"{checkpoint_dir}/{topic}") \
+                        .trigger(processingTime="30 seconds") \
+                        .outputMode(writemode) \
+                        .start()
+    '''hot_spot_community_pickup_window_stream = return_write_stream(hot_spot_community_pickup_window,
                                                                 "hotspotCommunityPickupWindowStream", "append",
-                                                                "hot_spot_community_pickup_window_stream")
+                                                                "hot_spot_community_pickup_window_stream")'''
     return hot_spot_community_pickup_window_stream
 
 
 def hotspotWindowStream(info_df_fin):
+    topic ="hotspotWindowStream"
+    writemode="append"
+    query_name = "hot_spot_window_stream"
     # hot spot pickup location
-    hot_spot_window = info_df_fin.withWatermark("event_timestamp", "10 seconds").groupBy(
-        window("event_timestamp", "1 minute", "30 seconds"), "pickup_centroid_location").count().selectExpr(
-        "to_json(struct(*)) AS value")
-    hot_spot_window_stream = return_write_stream(hot_spot_window, "hotspotWindowStream", "append", "hot_spot_window_stream")
+    info_df_fin = info_df_fin.withColumn("geom", F.concat(F.round(F.col("pickup_centroid_latitude").cast("double"),3).cast("string"), F.lit(','), F.round(F.col("pickup_centroid_longitude").cast("double"),3).cast("string")    ))
+    info_df_fin=info_df_fin.select("geom","event_timestamp","trip_total")
+    hot_spot_window = info_df_fin.withWatermark("event_timestamp", "10 seconds") \
+    .groupBy(
+        window("event_timestamp", "1 minute", "30 seconds"), "geom").agg(count("*").alias("demand"))#.selectExpr("to_json(struct(*)) AS value")
+    
+
+    hot_spot_window = hot_spot_window.select("geom","demand",F.col("window.start").alias("win_start"), F.col("window.end").alias("win_end"))   
+    
+    df_with_region = info_df_fin.alias('a').join(
+            hot_spot_window.alias('b'),
+            [
+                info_df_fin["geom"] == hot_spot_window["geom"], F.expr("a.event_timestamp >= b.win_start and a.event_timestamp<b.win_end")
+            ]
+        ).drop(hot_spot_window["geom"])
+
+    df_with_surcharge = df_with_region.withColumn(
+    "surcharge_multiplier",
+            F.when(F.col("demand") > 2, 1.2).otherwise(1.0)
+        ).withColumn(
+            "dynamic_price",
+            col("trip_total") * col("surcharge_multiplier")
+        ).selectExpr("to_json(struct(*)) AS value")
+    #hot_spot_window_stream = return_write_stream(hot_spot_window, "hotspotWindowStream", "append", "hot_spot_window_stream")\
+    
+    hot_spot_window_stream =  df_with_surcharge.writeStream \
+                        .queryName(query_name) \
+                        .foreachBatch(write_to_multiple_sinks(topic)) \
+                        .option("checkpointLocation", f"{checkpoint_dir}/{topic}") \
+                        .trigger(processingTime="1 minute") \
+                        .outputMode(writemode) \
+                        .start()
     return hot_spot_window_stream
+
+
+
 
 
 if __name__=="__main__":
 
-    sum_fare_window_stream.awaitTermination()
-    hot_spot_window_stream.awaitTermination()
-    hot_spot_community_pickup_window_stream.awaitTermination()
-    trips_total_stream.awaitTermination()
+     # Create Spark connection
+    spark = create_spark_connection()
+
+    if spark is not None:
+        # Create connection to Kafka with Spark
+        info_df_fin = read_from_kafka(spark)
+        #hot_spot_window_stream = hotspotWindowStream(info_df_fin)
+        #sum_fare_window_stream = sumFareWindowStream(info_df_fin)
+        
+        hot_spot_community_pickup_window_stream = hotspotCommunityPickupWindowStream(info_df_fin)
+        #trips_total_stream = tripsTotalStream(info_df_fin)
+
+        #sum_fare_window_stream.awaitTermination()
+        #hot_spot_window_stream.awaitTermination()
+        hot_spot_community_pickup_window_stream.awaitTermination()
+        #trips_total_stream.awaitTermination()
