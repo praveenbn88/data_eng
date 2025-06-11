@@ -23,11 +23,16 @@ APP_NAME = "tenantstreamapp"
 KAFKA_HOST = "broker:9092"
 cassandra_keyspace = "spark_streaming"
 
-checkpoint_dir = "/tmp/checkpoints_new_89"
+checkpoint_dir = "/tmp/checkpoints_new_999"
 ################## Global Variables #########################
 
 
 def create_spark_connection():
+    """
+    Create and return a SparkSession configured for Kafka and Cassandra integration.
+    Returns:
+        SparkSession: Configured Spark session object.
+    """
     try:
         spark = SparkSession.builder \
                     .appName('SparkDataStreaming') \
@@ -48,6 +53,11 @@ def create_spark_connection():
 
 ################################ Cassandra Setup ####################################################
 def create_keyspace(session):
+    """
+    Create the Cassandra keyspace if it does not exist.
+    Args:
+        session: Cassandra session object.
+    """
     session.execute(f"""
         CREATE KEYSPACE IF NOT EXISTS {cassandra_keyspace}
         WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}
@@ -57,6 +67,11 @@ def create_keyspace(session):
 
 
 def create_cassandra_connection():
+    """
+    Establish and return a connection to the Cassandra cluster.
+    Returns:
+        Cassandra session object or None if connection fails.
+    """
     try:
         # Connection to Cassandra cluster
         cluster = Cluster(['cassandra_db'])
@@ -73,7 +88,6 @@ def create_cassandra_connection():
 
 def create_cassandra_table(session, table_name, schema, primary_key):
     """
-    Create a Cassandra table if not exists with the given schema and primary key.
 
     :param session: Cassandra driver session (e.g., from cassandra.cluster.Cluster.connect())  
     :param table_name: Table name as string  
@@ -103,7 +117,13 @@ def create_cassandra_table(session, table_name, schema, primary_key):
 
 
 
-def write_to_cassandra(df,table_name):
+def write_to_cassandra(df, table_name):
+    """
+    Write a DataFrame to a Cassandra table, appending a last_modified_ts column.
+    Args:
+        df (DataFrame): Spark DataFrame to write.
+        table_name (str): Target Cassandra table name.
+    """
     try:
         selection_df = df.withColumn("last_modified_ts", F.current_timestamp())
 
@@ -128,6 +148,12 @@ uuid_udf = F.udf(lambda: str(uuid.uuid4()), StringType())
 
 
 def return_write_stream(df, topic):
+    """
+    Write a DataFrame to a Kafka topic in append mode.
+    Args:
+        df (DataFrame): Spark DataFrame to write.
+        topic (str): Kafka topic name (without app prefix).
+    """
     logger.info(f"inside return_write_stream for topic {APP_NAME}_{topic}")
     '''return df.writeStream.outputMode(mode).format("kafka").queryName(name).option("kafka.bootstrap.servers",
                                                                                   KAFKA_HOST).option(
@@ -142,7 +168,15 @@ def return_write_stream(df, topic):
 
 
 
-def  write_to_multiple_sinks(topic,table_name):
+def write_to_multiple_sinks(topic, table_name=None):
+    """
+    Returns a function to process each micro-batch, writing to Cassandra and/or Kafka as needed.
+    Args:
+        topic (str): Kafka topic name.
+        table_name (str, optional): Cassandra table name.
+    Returns:
+        function: Batch processing function for foreachBatch.
+    """
 
     def process_batch(df, batch_id):
         print(f"Processing batch {batch_id}")
@@ -166,6 +200,13 @@ def  write_to_multiple_sinks(topic,table_name):
 
 
 def read_from_kafka(spark):
+    """
+    Read streaming data from a Kafka topic and parse it into a structured DataFrame.
+    Args:
+        spark (SparkSession): Spark session object.
+    Returns:
+        DataFrame: Parsed DataFrame with taxi trip schema.
+    """
 
     schema = StructType().add("trip_id", StringType(), True) \
         .add("taxi_id", StringType(), True) \
@@ -212,6 +253,13 @@ def read_from_kafka(spark):
 
 
 def sumFareWindowStream(info_df_fin):
+    """
+    Compute sum of fares, tips, and trip totals in 5-second windows with watermarking.
+    Args:
+        info_df_fin (DataFrame): Input DataFrame with trip data.
+    Returns:
+        StreamingQuery: The running streaming query object.
+    """
     topic ="sumFareWindowStream"
     writemode="update"
     query_name = "sum_fare_window_stream"
@@ -222,8 +270,7 @@ def sumFareWindowStream(info_df_fin):
         window("event_timestamp", "5 seconds")).agg(round(sum("fare"), 0).alias("total_fare"),
                                                     round(sum("tips"), 0).alias("tips_fare"),
                                                     round(sum("trip_total"), 0).alias(
-                                                        "total_trip_total")).selectExpr(
-        "to_json(struct(*)) AS value")
+                                                        "total_trip_total"))#.selectExpr("to_json(struct(*)) AS value")
     #sum_fare_window_stream = return_write_stream(sum_fare_window, "sumFareWindowStream", "update", "sum_fare_window_stream")
     sum_fare_window_stream =  sum_fare_window.writeStream \
                                 .queryName(query_name) \
@@ -235,6 +282,13 @@ def sumFareWindowStream(info_df_fin):
 
 
 def tripsTotalStream(info_df_fin):
+    """
+    Compute total trips, fare, and averages for the current day in a streaming window.
+    Args:
+        info_df_fin (DataFrame): Input DataFrame with trip data.
+    Returns:
+        StreamingQuery: The running streaming query object.
+    """
     # total so far
     topic ="tripsTotalStream"
     writemode="update"
@@ -247,8 +301,7 @@ def tripsTotalStream(info_df_fin):
 
     trips_total = specific_time_data.select(count("*").alias("trips_total"), round(sum("fare"), 0).alias("fare_total"),
                                             round(avg("tips"), 0).alias("tips_avg"),
-                                            round(avg("trip_total"), 0).alias("trip_total_avg")).selectExpr(
-        "to_json(struct(*)) AS value")
+                                            round(avg("trip_total"), 0).alias("trip_total_avg"))#.selectExpr( "to_json(struct(*)) AS value")
     ##trips_total_stream = return_write_stream(trips_total, "tripsTotalStream", "complete", "trips_total_stream")
 
     trips_total_stream =  trips_total.writeStream \
@@ -261,6 +314,13 @@ def tripsTotalStream(info_df_fin):
 
 
 def hotspotCommunityPickupWindowStream(info_df_fin):
+    """
+    Detect demand hotspots by community area using windowed counts, and write to Cassandra.
+    Args:
+        info_df_fin (DataFrame): Input DataFrame with trip data.
+    Returns:
+        StreamingQuery: The running streaming query object.
+    """
     topic ="hotspotCommunityPickupWindowStream"
     writemode="append"
     query_name = "hot_spot_community_pickup_window_stream"
@@ -306,6 +366,13 @@ def hotspotCommunityPickupWindowStream(info_df_fin):
 
 
 def hotspotWindowStream(info_df_fin):
+    """
+    Detect demand hotspots by pickup location (lat/lon), compute dynamic pricing, and write results.
+    Args:
+        info_df_fin (DataFrame): Input DataFrame with trip data.
+    Returns:
+        StreamingQuery: The running streaming query object.
+    """
     topic ="hotspotWindowStream"
     writemode="append"
     query_name = "hot_spot_window_stream"
@@ -356,13 +423,13 @@ if __name__=="__main__":
     if spark is not None:
         # Create connection to Kafka with Spark
         info_df_fin = read_from_kafka(spark)
-        #hot_spot_window_stream = hotspotWindowStream(info_df_fin)
-        #sum_fare_window_stream = sumFareWindowStream(info_df_fin)
+        hot_spot_window_stream = hotspotWindowStream(info_df_fin)
+        sum_fare_window_stream = sumFareWindowStream(info_df_fin)
         
         hot_spot_community_pickup_window_stream = hotspotCommunityPickupWindowStream(info_df_fin)
-        #trips_total_stream = tripsTotalStream(info_df_fin)
+        trips_total_stream = tripsTotalStream(info_df_fin)
 
-        #sum_fare_window_stream.awaitTermination()
-        #hot_spot_window_stream.awaitTermination()
+        sum_fare_window_stream.awaitTermination()
+        hot_spot_window_stream.awaitTermination()
         hot_spot_community_pickup_window_stream.awaitTermination()
-        #trips_total_stream.awaitTermination()
+        trips_total_stream.awaitTermination()
