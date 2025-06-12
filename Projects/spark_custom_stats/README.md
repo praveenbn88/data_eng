@@ -1,6 +1,15 @@
 # Spark Custom Framework
 
 This repository contains a custom Spark framework with REST API capabilities, database integration, and S3 utilities.
+Whenever spark saves any data, it saves
+  - Size of entire files written
+  - Avg File Size
+  - Number of Files saved
+  - Count of Records 
+  - Time taken to save the data
+  - Miscellaneous values like type of files, path, partitioned columns etc.
+
+This will be very helpful to get an overall understanding of how Spark is utilising our Data Lake and for performance Optimisations
 
 ## Project Structure
 
