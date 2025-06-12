@@ -1,3 +1,16 @@
+"""
+Streaming Analytics Platform for Taxi Trip Data
+
+This script implements a PySpark Structured Streaming application that ingests real-time taxi trip data from Kafka, processes it using various windowed aggregations and transformations, and writes the results to Cassandra tables and/or Kafka topics. The script includes functions for setting up Spark and Cassandra connections, defining schemas, creating tables, and managing streaming queries for analytics such as fare windows, trip totals, and demand hotspots. It is designed for scalable, real-time analytics in a big data environment.
+
+
+Note: I have implemented Cassandra writing functionality only for hotspotCommunityPickupWindowStream function. Take it as an assignment to implement for others.
+
+#Query you can use in Grafana
+SELECT date_hour_min,pickup_community_area, count FROM hot_spot_community_pickup_window_stream 
+WHERE last_modified_ts >= dateOf(now()) - 7d and count>2
+ALLOW FILTERING;
+"""
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col, count, sum, avg, current_timestamp, window, round, current_date, \
     concat, lit, date_add
@@ -19,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 ################## Global Variables #########################
 
-APP_NAME = "tenantstreamapp"
+APP_NAME = "taxi_trip"
 KAFKA_HOST = "broker:9092"
 cassandra_keyspace = "spark_streaming"
 
