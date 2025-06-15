@@ -126,7 +126,7 @@ docker-compose ps
 | **Airflow Web UI** | http://localhost:8080 | `airflow` / `airflow` |
 | **Kafka UI** | http://localhost:8085 | No authentication |
 | **Grafana** | http://localhost:3000 | `admin` / `admin` |
-| **Spark Master** | http://localhost:9090 | No authentication |
+| **Spark UI** | http://localhost:4040 | No authentication |
 
 ### 4. Run the Analytics Pipeline
 
