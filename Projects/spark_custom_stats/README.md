@@ -1,7 +1,7 @@
 # Spark Custom Metrics Framework
 
 This repository contains a custom Spark framework with REST API capabilities, database integration, and S3 utilities.
-Whenever spark saves any data, it saves
+Whenever spark writes any data, it saves
   - Size of entire files written
   - Avg File Size
   - Number of Files saved
