@@ -1,4 +1,4 @@
-# Spark Custom Framework
+# Spark Custom Metrics Framework
 
 This repository contains a custom Spark framework with REST API capabilities, database integration, and S3 utilities.
 Whenever spark saves any data, it saves
